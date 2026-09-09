@@ -1,0 +1,27 @@
+# --- MASTER CIENA SAOS 10.X TEMPLATE ---
+base-system set hostname "{{ node_name }}"
+# Base Routing Interface Configuration
+classifiers classifier 'CL-SYSTEM' filter-entry 'FE-SYSTEM'
+vpp vpp 'VPP-MAIN'
+oc-if:interfaces interface '{{ port_no }}' config name '{{ port_no }}' enabled true
+oc-if:interfaces interface 'Loopback0' config name 'Loopback0' enabled true
+oc-ip:ipv4 address '{{ system_ip }}' config address '{{ system_ip }}' prefix-length 32
+{% if topology_role in ['B4A', 'B4B'] %}
+fps bgp instance 'default'
+  as {{ local_as }}
+  router-id {{ system_ip }}
+  peer-group 'IBGP-MESH'
+    remote-as {{ local_as }}
+    update-source 'Loopback0'
+  exit
+exit
+{% endif %}
+{% if topology_role == 'B4E' %}
+vrf vrf '{{ customer_vrf_name }}'
+  config
+    route-distinguisher '{{ local_as }}:{{ customer_vrf_id }}'
+  exit
+exit
+# Attaching the customer port to the VRF
+oc-if:interfaces interface '{{ port_no }}' routed-bgp vrf '{{ customer_vrf_name }}'
+{% endif %}

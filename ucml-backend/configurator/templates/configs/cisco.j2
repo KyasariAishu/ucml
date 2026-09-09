@@ -1,0 +1,26 @@
+# --- MASTER CISCO IOS XR TEMPLATE ---
+hostname {{ node_name }}
+interface Loopback0
+ ipv4 address {{ system_ip }} 255.255.255.255
+!
+{% if topology_role in ['B4A', 'B4B'] %}
+router bgp {{ local_as }}
+ bgp router-id {{ system_ip }}
+ address-family ipv4 unicast
+ !
+ neighbor-group IBGP-MESH
+  remote-as {{ local_as }}
+  update-source Loopback0
+  address-family ipv4 unicast
+  !
+ !
+!
+{% endif %}
+{% if topology_role == 'B4E' %}
+vrf {{ customer_vrf_name }}
+ address-family ipv4 unicast
+  import route-target {{ local_as }}:{{ customer_vrf_id }}
+  export route-target {{ local_as }}:{{ customer_vrf_id }}
+ !
+!
+{% endif %}

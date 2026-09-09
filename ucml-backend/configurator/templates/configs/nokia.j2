@@ -1,0 +1,37 @@
+# --- MASTER NOKIA SR OS TEMPLATE ---
+configure {
+    system {
+        name "{{ node_name }}"
+    }
+    router "Base" {
+        autonomous-system {{ local_as }}
+
+        interface "system" {
+            ipv4 {
+                primary {
+                    address {{ system_ip }}
+                    prefix-length 32
+                }
+            }
+        }
+        {% if topology_role in ['B4A', 'B4B'] %}
+        bgp {
+            admin-state enable
+            rapid-withdrawal true
+            group "ibgp-mesh" {
+                peer-as {{ local_as }}
+                type internal
+            }
+        }
+        {% endif %}
+    }
+    {% if topology_role == 'B4E' %}
+    service {
+        vprn {{ customer_vrf_id }} {
+            admin-state enable
+            customer "1"
+            route-distinguisher "{{ system_ip }}:{{ customer_vrf_id }}"
+        }
+    }
+    {% endif %}
+}
