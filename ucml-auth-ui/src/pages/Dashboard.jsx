@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMe, logout } from "../api/auth.js";
-import { getDevices } from "../api/devices.js";
+import { getDevices, updateDevice, generateConfig, getConfigJob } from "../api/devices.js";
 import "../styles/dashboard.css";
 
-const PAGE_SIZE = 5; // must match settings.py's REST_FRAMEWORK["PAGE_SIZE"]
+const PAGE_SIZE = 5;
+const TOPOLOGIES = ["B4A", "B4B", "B4C", "B4E"];
 
 function formatDate(isoString) {
   return new Date(isoString).toLocaleDateString(undefined, {
@@ -19,7 +20,7 @@ export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [devices, setDevices] = useState([]);
   const [count, setCount] = useState(0);
-  const [page, setPage] = useState(1); // DRF pages are 1-indexed
+  const [page, setPage] = useState(1);
   const [openDevice, setOpenDevice] = useState(null);
   const [error, setError] = useState("");
 
@@ -32,7 +33,6 @@ export default function Dashboard() {
       .catch(() => setError("Could not load devices."));
   }, []);
 
-  // Load the logged-in user once.
   useEffect(() => {
     getMe()
       .then(setUser)
@@ -42,7 +42,6 @@ export default function Dashboard() {
       });
   }, [navigate]);
 
-  // Load devices every time the page changes.
   useEffect(() => {
     loadDevices(page);
   }, [page, loadDevices]);
@@ -51,6 +50,10 @@ export default function Dashboard() {
 
   function toggleDevice(id) {
     setOpenDevice((current) => (current === id ? null : id));
+  }
+
+  function handleDeviceSaved(updated) {
+    setDevices((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
   }
 
   function handleLogout() {
@@ -73,10 +76,7 @@ export default function Dashboard() {
       </header>
 
       <section className="dash-overview">
-        <p>
-          This is a mockup dashboard for UCML. Below is the list of network
-          devices.
-        </p>
+        <p>This is a mockup dashboard for UCML. Below is the list of network devices.</p>
       </section>
 
       {error ? <p className="dash-error">{error}</p> : null}
@@ -91,15 +91,14 @@ export default function Dashboard() {
               device={device}
               isOpen={openDevice === device.id}
               onToggle={() => toggleDevice(device.id)}
+              onSaved={handleDeviceSaved}
             />
           ))
         )}
       </section>
 
       <div className="dash-pager">
-        <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
-          Prev
-        </button>
+        <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Prev</button>
         {Array.from({ length: totalPages }, (_, i) => (
           <button
             key={i}
@@ -109,41 +108,190 @@ export default function Dashboard() {
             {i + 1}
           </button>
         ))}
-        <button
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          disabled={page >= totalPages}
-        >
-          Next
-        </button>
+        <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next</button>
       </div>
     </div>
   );
 }
 
-function DeviceRow({ device, isOpen, onToggle }) {
+// Fields the user can edit. Vendor and model are deliberately excluded --
+// the backend's DeviceUpdateSerializer marks them read_only too, so this
+// is a UI convenience, not the only thing stopping a change.
+const EDITABLE_FIELDS = [
+  "device_name", "device_type", "topology", "port_no", "ip_address",
+  "subnet_mask", "gateway", "mac_address", "local_as", "system_ip",
+  "customer_vrf_id", "customer_vrf_name",
+];
+
+function DeviceRow({ device, isOpen, onToggle, onSaved }) {
+  const [form, setForm] = useState(device);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  const [jobStatus, setJobStatus] = useState(null); // null | PENDING | RUNNING | SUCCESS | FAILED
+  const [generatedConfig, setGeneratedConfig] = useState("");
+  const [jobError, setJobError] = useState("");
+  const pollRef = useRef(null);
+
+  // Keep the form in sync if the device prop changes from outside (e.g. after save).
+  useEffect(() => setForm(device), [device]);
+
+  // Stop polling if this row unmounts (e.g. navigating to another page of results).
+  useEffect(() => () => clearInterval(pollRef.current), []);
+
+  function updateField(e) {
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: value }));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = {};
+      for (const key of EDITABLE_FIELDS) payload[key] = form[key];
+      const updated = await updateDevice(device.id, payload);
+      onSaved(updated);
+      setSaveMessage("Saved.");
+    } catch (err) {
+      setSaveMessage(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleGenerate() {
+  setJobError("");
+  setGeneratedConfig("");
+  setJobStatus("PENDING");
+
+  try {
+    const job = await generateConfig(device.id);
+    let attempts = 0;
+    const MAX_ATTEMPTS = 15; // 15 seconds at 1 poll/second
+
+    pollRef.current = setInterval(async () => {
+      attempts += 1;
+      try {
+        const latest = await getConfigJob(job.id);
+        setJobStatus(latest.status);
+
+        if (latest.status === "SUCCESS") {
+          clearInterval(pollRef.current);
+          setGeneratedConfig(latest.generated_config);
+        } else if (latest.status === "FAILED") {
+          clearInterval(pollRef.current);
+          setJobError(latest.error_message || "Config generation failed.");
+        } else if (attempts >= MAX_ATTEMPTS) {
+          clearInterval(pollRef.current);
+          setJobStatus(null);
+          setJobError("This is taking longer than expected. Check that the Celery worker is running.");
+        }
+      } catch {
+        clearInterval(pollRef.current);
+        setJobStatus(null);
+        setJobError("Lost track of the job status.");
+      }
+    }, 1000);
+  } catch (err) {
+    setJobStatus(null);
+    setJobError(err.message);
+  }
+}
+
+  function handleDownload() {
+    const blob = new Blob([generatedConfig], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${device.device_name}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const isBusy = jobStatus === "PENDING" || jobStatus === "RUNNING";
+
   return (
     <div className="device-row">
       <button className="device-row-bar" onClick={onToggle}>
         <span className="device-row-main">
           <strong>{device.device_name}</strong>
-          <span className="device-row-meta">
-            {device.device_type} · {formatDate(device.created_at)}
-          </span>
+          <span className="device-row-meta">{device.device_type} · {formatDate(device.created_at)}</span>
         </span>
         <span className={`chevron ${isOpen ? "chevron-open" : ""}`}>▾</span>
       </button>
 
       {isOpen ? (
-        <dl className="device-fields">
-          <div><dt>Vendor</dt><dd>{device.vendor}</dd></div>
-          <div><dt>Model</dt><dd>{device.model}</dd></div>
-          <div><dt>Topology</dt><dd>{device.topology}</dd></div>
-          <div><dt>Port</dt><dd>{device.port_no}</dd></div>
-          <div><dt>IP address</dt><dd>{device.ip_address}</dd></div>
-          <div><dt>Subnet (CIDR)</dt><dd>/{device.subnet_mask}</dd></div>
-          <div><dt>Gateway</dt><dd>{device.gateway}</dd></div>
-          <div><dt>MAC address</dt><dd>{device.mac_address}</dd></div>
-        </dl>
+        <div className="device-fields">
+          <div className="field-locked"><label>Vendor</label><input value={device.vendor} disabled /></div>
+          <div className="field-locked"><label>Model</label><input value={device.model} disabled /></div>
+
+          <div className="field-edit">
+            <label>Device name</label>
+            <input name="device_name" value={form.device_name} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>Device type</label>
+            <input name="device_type" value={form.device_type} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>Topology</label>
+            <select name="topology" value={form.topology} onChange={updateField}>
+              {TOPOLOGIES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="field-edit">
+            <label>Port</label>
+            <input name="port_no" value={form.port_no} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>IP address</label>
+            <input name="ip_address" value={form.ip_address} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>Subnet (CIDR)</label>
+            <input type="number" min="0" max="32" name="subnet_mask" value={form.subnet_mask} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>Gateway</label>
+            <input name="gateway" value={form.gateway} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>MAC address</label>
+            <input name="mac_address" value={form.mac_address} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>Local AS</label>
+            <input type="number" name="local_as" value={form.local_as ?? ""} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>System IP</label>
+            <input name="system_ip" value={form.system_ip ?? ""} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>Customer VRF ID</label>
+            <input name="customer_vrf_id" value={form.customer_vrf_id ?? ""} onChange={updateField} />
+          </div>
+          <div className="field-edit">
+            <label>Customer VRF name</label>
+            <input name="customer_vrf_name" value={form.customer_vrf_name ?? ""} onChange={updateField} />
+          </div>
+
+          <div className="device-actions">
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button className="btn" onClick={handleGenerate} disabled={isBusy}>
+              {isBusy ? "Generating…" : "Generate Config"}
+            </button>
+            <button className="btn" onClick={handleDownload} disabled={!generatedConfig}>
+              Download
+            </button>
+            {saveMessage ? <span className="status-text">{saveMessage}</span> : null}
+            {jobStatus === "SUCCESS" ? <span className="status-text status-success">Config ready.</span> : null}
+            {jobError ? <span className="status-text status-error">{jobError}</span> : null}
+          </div>
+        </div>
       ) : null}
     </div>
   );

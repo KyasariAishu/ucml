@@ -2,7 +2,7 @@ from django.shortcuts import render
 
 from rest_framework import permissions, generics 
 
-from .serializers import DeviceSerializer , ConfigJobSerializer
+from .serializers import DeviceSerializer , ConfigJobSerializer, DeviceUpdateSerializer
 from .models import Device, ConfigJob
 
 from rest_framework.response import Response 
@@ -32,4 +32,10 @@ class ConfigJobDetailView(generics.RetrieveAPIView):
     serializer_class=ConfigJobSerializer
     permission_class= [permissions.IsAuthenticated]
 
+
+class DeviceDetailView(generics.RetrieveUpdateAPIView):
+    """GET to fetch one device, PATCH to update its editable fields."""
+    queryset=Device.objects.all()
+    serializer_class=DeviceUpdateSerializer
+    permission_classes= [permissions.IsAuthenticated]
 
