@@ -33,8 +33,8 @@ class ConfigJobDetailView(generics.RetrieveAPIView):
     permission_class= [permissions.IsAuthenticated]
 
 
-class DeviceDetailView(generics.RetrieveUpdateAPIView):
-    """GET to fetch one device, PATCH to update its editable fields."""
+class DeviceDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET one device, PATCH to update it, DELETE to remove it."""
     queryset=Device.objects.all()
     serializer_class=DeviceUpdateSerializer
     permission_classes= [permissions.IsAuthenticated]

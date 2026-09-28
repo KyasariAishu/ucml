@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMe, logout } from "../api/auth.js";
-import { getDevices, updateDevice, generateConfig, getConfigJob } from "../api/devices.js";
+import { getDevices, updateDevice, generateConfig, getConfigJob,deleteDevice  } from "../api/devices.js";
 import "../styles/dashboard.css";
 import NewDeviceForm from "../components/NewDeviceForm.jsx";
 
@@ -65,6 +65,14 @@ export default function Dashboard() {
   else setPage(1);
 }
 
+  function handleDeviceDeleted() {
+    setOpenDevice(null);
+    // If that was the last device on this page, step back a page;
+    // otherwise refetch so the next device slides up and the count updates.
+    if (devices.length === 1 && page > 1) setPage(page - 1);
+    else loadDevices(page);
+ }
+
   function handleLogout() {
     logout();
     navigate("/login");
@@ -114,6 +122,7 @@ export default function Dashboard() {
               onToggle={() => toggleDevice(device.id)}
               onSaved={handleDeviceSaved}
               onCreateFrom={() => setCreating({ vendor: device.vendor })}
+              onDeleted={handleDeviceDeleted}
             />
           ))
         )}
@@ -145,7 +154,7 @@ const EDITABLE_FIELDS = [
   "customer_vrf_id", "customer_vrf_name",
 ];
 
-function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom }) {
+function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom,onDeleted  }) {
   const [form, setForm] = useState(device);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -153,6 +162,7 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom }) {
   const [jobStatus, setJobStatus] = useState(null); // null | PENDING | RUNNING | SUCCESS | FAILED
   const [generatedConfig, setGeneratedConfig] = useState("");
   const [jobError, setJobError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const pollRef = useRef(null);
 
   // Keep the form in sync if the device prop changes from outside (e.g. after save).
@@ -231,17 +241,53 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom }) {
     URL.revokeObjectURL(url);
   }
 
+  async function handleDelete() {
+    const ok = window.confirm(
+      `Delete "${device.device_name}"? This also deletes its config history and can't be undone.`
+    );
+    if (!ok) return;
+
+    setDeleting(true);
+    try {
+      await deleteDevice(device.id);
+      onDeleted(); // this row unmounts once the list refreshes
+    } catch (err) {
+      setSaveMessage(err.message);
+      setDeleting(false);
+    }
+  }
   const isBusy = jobStatus === "PENDING" || jobStatus === "RUNNING";
 
-  return (
+    return (
     <div className="device-row">
-      <button className="device-row-bar" onClick={onToggle}>
-        <span className="device-row-main">
-          <strong>{device.device_name}</strong>
-          <span className="device-row-meta">{device.device_type} · {formatDate(device.created_at)}</span>
-        </span>
-        <span className={`chevron ${isOpen ? "chevron-open" : ""}`}>▾</span>
-      </button>
+            <div className="device-row-header">
+        <button className="device-row-bar" onClick={onToggle}>
+          <span className="device-row-main">
+            <strong>{device.device_name}</strong>
+            <span className="device-row-meta">{device.device_type} · {formatDate(device.created_at)}</span>
+          </span>
+        </button>
+
+        <button
+          className="icon-btn"
+          onClick={handleDelete}
+          disabled={deleting}
+          aria-label={`Delete ${device.device_name}`}
+          title="Delete device"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6M14 11v6" />
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+          </svg>
+        </button>
+
+        <button className="chevron-btn" onClick={onToggle} tabIndex={-1} aria-hidden="true">
+          <span className={`chevron ${isOpen ? "chevron-open" : ""}`}>▾</span>
+        </button>
+      </div>
 
       {isOpen ? (
         <div className="device-fields">

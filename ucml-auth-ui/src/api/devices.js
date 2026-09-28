@@ -62,3 +62,12 @@ export async function getConfigJob(jobId) {
   if (!res.ok) throw new Error("Could not fetch job status.");
   return res.json();
 }
+
+export async function deleteDevice(id) {
+  const res = await fetch(`/api/devices/${id}/`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getAccessToken()}` },
+  });
+  if (!res.ok) throw new Error("Could not delete device.");
+  // 204 No Content: there's no body, so don't call res.json() here.
+}
