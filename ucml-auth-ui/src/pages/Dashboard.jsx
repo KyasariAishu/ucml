@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getMe, logout } from "../api/auth.js";
 import { getDevices, updateDevice, generateConfig, getConfigJob } from "../api/devices.js";
 import "../styles/dashboard.css";
+import NewDeviceForm from "../components/NewDeviceForm.jsx";
 
 const PAGE_SIZE = 5;
 const TOPOLOGIES = ["B4A", "B4B", "B4C", "B4E"];
@@ -23,6 +24,7 @@ export default function Dashboard() {
   const [page, setPage] = useState(1);
   const [openDevice, setOpenDevice] = useState(null);
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(null); // null = closed, { vendor } = open
 
   const loadDevices = useCallback((pageNum) => {
     getDevices(pageNum)
@@ -56,6 +58,13 @@ export default function Dashboard() {
     setDevices((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
   }
 
+  function handleDeviceCreated() {
+  setCreating(null);
+  // Newest devices sort first, so go to page 1 to show the new one.
+  if (page === 1) loadDevices(1);
+  else setPage(1);
+}
+
   function handleLogout() {
     logout();
     navigate("/login");
@@ -70,7 +79,7 @@ export default function Dashboard() {
       <header className="dash-header">
         <div>
           <p className="dash-eyebrow">UCML</p>
-          <h1 className="dash-title">Welcome, {user.full_name || user.email}</h1>
+          {/* <h1 className="dash-title">Welcome, {user.full_name || user.email}</h1> */}
         </div>
         <button className="dash-logout" onClick={handleLogout}>Log out</button>
       </header>
@@ -78,7 +87,19 @@ export default function Dashboard() {
       <section className="dash-overview">
         <p>This is a mockup dashboard for UCML. Below is the list of network devices.</p>
       </section>
+      <div className="dash-toolbar">
+        <button className="btn btn-primary" onClick={() => setCreating({ vendor: "" })}>
+          Add device
+        </button>
+      </div>
 
+      {creating ? (
+        <NewDeviceForm
+          initialVendor={creating.vendor}
+          onCancel={() => setCreating(null)}
+          onCreated={handleDeviceCreated}
+        />
+      ) : null}
       {error ? <p className="dash-error">{error}</p> : null}
 
       <section className="dash-groups">
@@ -92,6 +113,7 @@ export default function Dashboard() {
               isOpen={openDevice === device.id}
               onToggle={() => toggleDevice(device.id)}
               onSaved={handleDeviceSaved}
+              onCreateFrom={() => setCreating({ vendor: device.vendor })}
             />
           ))
         )}
@@ -123,7 +145,7 @@ const EDITABLE_FIELDS = [
   "customer_vrf_id", "customer_vrf_name",
 ];
 
-function DeviceRow({ device, isOpen, onToggle, onSaved }) {
+function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom }) {
   const [form, setForm] = useState(device);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -286,6 +308,9 @@ function DeviceRow({ device, isOpen, onToggle, onSaved }) {
             </button>
             <button className="btn" onClick={handleDownload} disabled={!generatedConfig}>
               Download
+            </button>
+            <button className="btn" onClick={onCreateFrom}>
+              Add device with this vendor
             </button>
             {saveMessage ? <span className="status-text">{saveMessage}</span> : null}
             {jobStatus === "SUCCESS" ? <span className="status-text status-success">Config ready.</span> : null}
