@@ -34,6 +34,7 @@ class Device(models.Model):
     customer_vrf_name = models.CharField(max_length=100, blank=True, help_text="VRF name (edge roles only)")
     # created_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
     def __str__(self):
         return f"{self.device_name} ({self.vendor})"
 

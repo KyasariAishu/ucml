@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMe, logout } from "../api/auth.js";
-import { getDevices, updateDevice, generateConfig, getConfigJob,deleteDevice  } from "../api/devices.js";
+import { getDevices, updateDevice, generateConfig, getConfigJob,deleteDevice ,getLatestConfig } from "../api/devices.js";
 import "../styles/dashboard.css";
 import NewDeviceForm from "../components/NewDeviceForm.jsx";
 
@@ -160,9 +160,11 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom,onDeleted  }
   const [saveMessage, setSaveMessage] = useState("");
 
   const [jobStatus, setJobStatus] = useState(null); // null | PENDING | RUNNING | SUCCESS | FAILED
-  const [generatedConfig, setGeneratedConfig] = useState("");
+  // const [generatedConfig, setGeneratedConfig] = useState("");
+  const [latestJob, setLatestJob] = useState(null); // last successful config job, if any
   const [jobError, setJobError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  // const [generatedConfig, setGeneratedConfig] = useState("");
   const pollRef = useRef(null);
 
   // Keep the form in sync if the device prop changes from outside (e.g. after save).
@@ -170,6 +172,16 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom,onDeleted  }
 
   // Stop polling if this row unmounts (e.g. navigating to another page of results).
   useEffect(() => () => clearInterval(pollRef.current), []);
+
+  // Load the saved config whenever this row is opened.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    getLatestConfig(device.id)
+      .then((job) => { if (!cancelled) setLatestJob(job); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isOpen, device.id]);
 
   function updateField(e) {
     const { name, value } = e.target;
@@ -194,7 +206,7 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom,onDeleted  }
 
   async function handleGenerate() {
   setJobError("");
-  setGeneratedConfig("");
+  // setGeneratedConfig("");
   setJobStatus("PENDING");
 
   try {
@@ -210,7 +222,8 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom,onDeleted  }
 
         if (latest.status === "SUCCESS") {
           clearInterval(pollRef.current);
-          setGeneratedConfig(latest.generated_config);
+          // setGeneratedConfig(latest.generated_config);
+          setLatestJob(latest);
         } else if (latest.status === "FAILED") {
           clearInterval(pollRef.current);
           setJobError(latest.error_message || "Config generation failed.");
@@ -232,14 +245,14 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom,onDeleted  }
 }
 
   function handleDownload() {
-    const blob = new Blob([generatedConfig], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${device.device_name}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const blob = new Blob([latestJob.generated_config], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${device.device_name}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
   async function handleDelete() {
     const ok = window.confirm(
@@ -257,6 +270,11 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom,onDeleted  }
     }
   }
   const isBusy = jobStatus === "PENDING" || jobStatus === "RUNNING";
+
+  // The saved config is stale if the device was edited after it was generated.
+  const isStale =
+    latestJob && new Date(device.updated_at) > new Date(latestJob.created_at);
+  const canDownload = Boolean(latestJob) && !isStale && !isBusy;
 
     return (
     <div className="device-row">
@@ -352,14 +370,24 @@ function DeviceRow({ device, isOpen, onToggle, onSaved,onCreateFrom,onDeleted  }
             <button className="btn" onClick={handleGenerate} disabled={isBusy}>
               {isBusy ? "Generating…" : "Generate Config"}
             </button>
-            <button className="btn" onClick={handleDownload} disabled={!generatedConfig}>
+            <button className="btn" onClick={handleDownload} disabled={!canDownload}>
               Download
             </button>
             <button className="btn" onClick={onCreateFrom}>
               Add device with this vendor
             </button>
             {saveMessage ? <span className="status-text">{saveMessage}</span> : null}
-            {jobStatus === "SUCCESS" ? <span className="status-text status-success">Config ready.</span> : null}
+            {/* {jobStatus === "SUCCESS" ? <span className="status-text status-success">Config ready.</span> : null} */}
+
+            {latestJob ? (
+              <span className="status-text">
+                Last generated: {new Date(latestJob.created_at).toLocaleString()}
+                {isStale ? " (device changed since, regenerate to download)" : ""}
+              </span>
+            ) : !isBusy ? (
+              <span className="status-text">No config generated yet.</span>
+            ) : null}
+
             {jobError ? <span className="status-text status-error">{jobError}</span> : null}
           </div>
         </div>

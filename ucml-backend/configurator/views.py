@@ -39,3 +39,21 @@ class DeviceDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class=DeviceUpdateSerializer
     permission_classes= [permissions.IsAuthenticated]
 
+class LatestConfigView(APIView):
+    """GET the most recent successful config for a device (204 if none yet)."""
+    permission_class=[permissions.IsAuthenticated]
+
+    def get(self,request,device_id):
+        device=get_object_or_404(Device,id=device_id)
+        job=(
+            ConfigJob.objects
+            .filter(device=device, status=ConfigJob.Status.SUCCESS)
+            .order_by("-created_at")
+            .first()
+        )
+
+        if job is None:
+            return Response(status=204)
+        return Response(ConfigJobSerializer(job).data)
+         
+

@@ -71,3 +71,12 @@ export async function deleteDevice(id) {
   if (!res.ok) throw new Error("Could not delete device.");
   // 204 No Content: there's no body, so don't call res.json() here.
 }
+
+export async function getLatestConfig(deviceId) {
+  const res = await fetch(`/api/devices/${deviceId}/latest-config/`, {
+    headers: { Authorization: `Bearer ${getAccessToken()}` },
+  });
+  if (res.status === 204) return null; // nothing generated yet
+  if (!res.ok) throw new Error("Could not load the latest config.");
+  return res.json();
+}

@@ -1,13 +1,13 @@
 from django.urls import path
 
-from .views import DeviceListCreateView, GenerateConfigView , ConfigJobDetailView, DeviceDetailView
+from .views import DeviceListCreateView, GenerateConfigView , ConfigJobDetailView, DeviceDetailView,LatestConfigView
 
 urlpatterns=[
     path("devices/",DeviceListCreateView.as_view(),name='device-list-create'),
     path("devices/<int:pk>/",DeviceDetailView.as_view(),name="device-detail"),
     path("devices/<int:device_id>/generate-config/",GenerateConfigView.as_view(),name="generate-config"),
     path("config-jobs/<int:pk>/",ConfigJobDetailView.as_view(),name="config-job-detail"), #check a job's status, and see the generated config once it's ready
-    
+    path("devices/<int:device_id>/latest-config/", LatestConfigView.as_view(), name="latest-config"),
 ]
 
 
