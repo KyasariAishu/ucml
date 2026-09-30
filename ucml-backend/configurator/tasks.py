@@ -3,7 +3,7 @@ from pathlib import Path
 from celery import shared_task
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
-from .models import ConfigJob
+from .models import ConfigJob 
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates" / "configs"
 
@@ -39,16 +39,22 @@ def generate_device_config(job_id):
         job.status = ConfigJob.Status.FAILED
         job.error_message = f"No template for vendor '{device.vendor}' (expected configs/{template_path})"
         job.save(update_fields=["status", "error_message"])
+        ConfigJob.objects.filter(device=device, status=ConfigJob.Status.FAILED).exclude(id=job.id).delete()
         return
     except Exception as exc:
         job.status = ConfigJob.Status.FAILED
         job.error_message = str(exc)
         job.save(update_fields=["status", "error_message"])
+        ConfigJob.objects.filter(device=device, status=ConfigJob.Status.FAILED).exclude(id=job.id).delete()
         return
 
     job.generated_config = rendered
     job.status = ConfigJob.Status.SUCCESS
     job.save(update_fields=["generated_config", "status"])
+
+    # Keep only the latest config per device -- clear out every other
+    # job (past successes and failures) now that this one succeeded.
+    ConfigJob.objects.filter(device=device).exclude(id=job.id).delete()
 
 
 # Celery worker don't run inside the runserver it runs parallel . it is seperate process that keeps running alongside it
